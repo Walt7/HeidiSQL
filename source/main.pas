@@ -6134,7 +6134,22 @@ begin
   if DBObj = nil then
     Exit;
   Screen.Cursor := crHourglass;
-  DBObj.Connection.Ping(True);
+  try
+    DBObj.Connection.Ping(True);
+  except
+    // Server not reachable anymore. We are painting, so an exception must not escape from here, and
+    // no dialog either. The error is already in the SQL log. Do not retry on each repaint, as every
+    // attempt blocks until the connection timeout. F5 or selecting the table again retries.
+    on E:EDbError do begin
+      vt.Header.Columns.Clear;
+      vt.Clear;
+      EnableDataTab(False);
+      vt.Tag := VTREE_LOADED;
+      Screen.Cursor := crDefault;
+      ShowStatusMsg(E.Message, 0);
+      Exit;
+    end;
+  end;
 
   if SelectedTableColumns.Count = 0 then begin
     vt.Header.Columns.Clear;
@@ -6589,7 +6604,7 @@ begin
   vt.BeginUpdate;
   vt.Clear;
   Msg := '';
-  if Conn <> nil then begin
+  if Conn <> nil then try
     ShowStatusMsg(f_('Displaying objects from "%s" ...', [Conn.Database]));
     Objects := Conn.GetDBObjects(Conn.Database, vt.Tag = VTREE_NOTLOADED_PURGECACHE, FActiveObjectGroup);
     vt.RootNodeCount := Objects.Count;
@@ -6624,6 +6639,10 @@ begin
       Delete(Msg, Length(Msg)-1, 2);
       Msg := Msg + ')';
     end;
+  except
+    // Lost connection. No exception must escape from a paint handler.
+    on E:EDbError do
+      Msg := E.Message;
   end;
   vt.OffsetXY := ScrollOffset;
   vt.EndUpdate;
@@ -11963,7 +11982,7 @@ begin
   Conn := ActiveConnection;
   Screen.Cursor := crHourglass;
   vt.Clear;
-  if Conn <> nil then begin
+  if Conn <> nil then try
     if vt.Tag = VTREE_NOTLOADED_PURGECACHE then begin
       for i:=0 to Conn.AllDatabases.Count-1 do begin
         if Conn.DbObjectsCached(Conn.AllDatabases[i]) then begin
@@ -11975,6 +11994,10 @@ begin
       end;
     end;
     vt.RootNodeCount := Conn.AllDatabases.Count;
+  except
+    // Lost connection. No exception must escape from a paint handler.
+    on E:EDbError do
+      ShowStatusMsg(E.Message, 0);
   end;
   tabDatabases.Caption := _('Databases') + ' ('+FormatNumber(vt.RootNodeCount)+')';
   vt.Tag := VTREE_LOADED;
